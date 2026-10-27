@@ -1,0 +1,9 @@
+# The build context is the repo root so the image can compile ush-join.
+# Keep secrets and everything the image doesn't need out of it.
+.git
+.local
+.env
+bin
+test
+docs
+*.md

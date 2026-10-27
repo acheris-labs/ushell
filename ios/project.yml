@@ -1,0 +1,79 @@
+name: USH
+options:
+  bundleIdPrefix: net.acheris
+  deploymentTarget:
+    iOS: "26.0"
+settings:
+  base:
+    SWIFT_VERSION: "5"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: 45V4VU4RQJ
+    CODE_SIGN_STYLE: Automatic
+packages:
+  USHKit:
+    path: USHKit
+  SwiftTerm:
+    url: https://github.com/migueldeicaza/SwiftTerm
+    from: 1.20.0
+targets:
+  USH:
+    type: application
+    platform: iOS
+    sources: [App]
+    dependencies:
+      - package: USHKit
+        product: USHCore
+      - package: USHKit
+        product: USHClient
+      - package: SwiftTerm
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: ush
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # Export compliance: SSH is standard, exempt encryption. Without this
+        # every TestFlight build waits for the question to be answered by hand.
+        ITSAppUsesNonExemptEncryption: false
+        UILaunchScreen: {}
+        UIApplicationSupportsMultipleScenes: false
+        NSCameraUsageDescription: Scans the pairing code that ush pair shows.
+        NSFaceIDUsageDescription: Shows a rendezvous's pairing code, which is the key to its sessions.
+        NSLocalNetworkUsageDescription: Connects to your ush rendezvous on the local network.
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: net.acheris.ush
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+  USHTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [Tests]
+    dependencies:
+      - target: USH
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: net.acheris.ush.tests
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/USH.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/USH
+        BUNDLE_LOADER: $(TEST_HOST)
+  USHUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [UITests]
+    dependencies:
+      - target: USH
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: net.acheris.ush.uitests
+schemes:
+  USH:
+    build:
+      targets:
+        USH: all
+    test:
+      targets: [USHTests, USHUITests]

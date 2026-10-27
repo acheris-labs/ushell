@@ -1,0 +1,8 @@
+.local/
+test/tmp/
+bin/
+__pycache__/
+.env
+ios/USHKit/.build/
+ios/*.xcodeproj/
+ios/build/

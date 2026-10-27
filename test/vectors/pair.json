@@ -1,0 +1,6 @@
+{
+  "seed": "aaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwha5dypq",
+  "login_public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAOhB7/zzhC+HXDdGOdLwJln5NYwm6UNXx3chmQSVTG4",
+  "host_public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIXfhnVKna5maZ9McrbCNdK302Wl/2/kc/+Jzu7qaj9j",
+  "payload": "{\"v\":1,\"name\":\"home\",\"host\":\"192.168.10.5\",\"port\":7874,\"user\":\"ush\",\"seed\":\"aaaqeayeaudaocajbifqydiob4ibceqtcqkrmfyydenbwha5dypq\"}"
+}

@@ -1,0 +1,13 @@
+services:
+  rendezvous:
+    build:
+      context: .
+      dockerfile: rendezvous/Dockerfile
+    ports:
+      - "0.0.0.0:7874:7874"     # ushd: the one port
+    environment:
+      # From .env, which `make seed` creates. The seed IS the key.
+      USH_SEED: ${USH_SEED:?run `make seed` to create .env}
+    tmpfs:
+      # Same as the chart: derived keys and the registry live in memory.
+      - /run/ush:uid=1000,gid=1000
