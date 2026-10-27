@@ -42,6 +42,14 @@ The rendezvous has **one**: 7874 (`port` in `~/.ushrc`). Sharers, viewers,
 the iPad app and plain OpenSSH all speak to `ushd` on it. `ush ping` checks
 it.
 
+## Install
+
+```sh
+brew install --cask acheris-labs/tools/ush
+```
+
+Apple silicon Macs. Anywhere else, `make install` builds it from source.
+
 ## Try it locally
 
 ```sh

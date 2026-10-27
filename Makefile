@@ -1,10 +1,43 @@
 BINDIR ?= $(HOME)/.local/bin
 
-.PHONY: build test install seed ios-acknowledgements test-ios-core test-ios-client ios-project ios-build test-ios-ui test-ios-app testflight
+.PHONY: build test install seed ios-acknowledgements test-ios-core test-ios-client ios-project ios-build test-ios-ui test-ios-app testflight dist sign release verify
 
 # Build the ush client for this machine.
 build:
 	go build -o bin/ush ./cmd/ush
+
+# --- Release: what the Homebrew cask installs (see DISTRIBUTING.md) ---------
+# SIGN_ID defaults to ad-hoc ("-"), which cannot be notarized; a release passes
+# a Developer ID. -trimpath keeps the build machine's paths out of the binary.
+SIGN_ID        ?= -
+NOTARY_PROFILE ?= ush-notary
+DIST           := bin/dist
+ZIP            := $(DIST)/ush.zip
+
+# Apple silicon only, like pr-mon.
+dist:
+	mkdir -p $(DIST)
+	GOOS=darwin GOARCH=arm64 go build -trimpath -o $(DIST)/ush ./cmd/ush
+
+# Hardened runtime and a secure timestamp are what notarization requires.
+sign: dist
+	@test "$(SIGN_ID)" != "-" || { echo "set SIGN_ID to a Developer ID"; exit 1; }
+	codesign --force --options runtime --timestamp --sign "$(SIGN_ID)" $(DIST)/ush
+	codesign --verify --strict $(DIST)/ush
+
+# A bare binary cannot carry a stapled ticket, so the zip goes as notarized
+# and Gatekeeper looks the ticket up online on first run.
+release: sign
+	rm -f $(ZIP)
+	ditto -c -k $(DIST)/ush $(ZIP)
+	xcrun notarytool submit $(ZIP) --keychain-profile "$(NOTARY_PROFILE)" --wait
+
+# Fails unless Gatekeeper accepts the binary as notarized, not merely signed.
+verify:
+	codesign --verify --strict --verbose=2 $(DIST)/ush
+	codesign -dv --verbose=2 $(DIST)/ush 2>&1 | grep -E '^(Authority=Developer ID|TeamIdentifier|CodeDirectory)'
+	spctl -a -vv -t open --context context:primary-signature $(DIST)/ush 2>&1 | tee /dev/stderr \
+	  | grep -q 'source=Notarized Developer ID'
 
 # Unit tests. The e2e and menu suites need a rendezvous; see README.
 test:
