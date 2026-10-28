@@ -11,15 +11,18 @@ brew install --cask acheris-labs/tools/ush
 ## Releasing
 
 ```sh
-git tag v0.1.0 && git push origin v0.1.0
+make release                 # tags the next patch (v0.1.0 -> v0.1.1) and pushes it
+make release VERSION=0.2.0   # or a version of your choosing
 ```
 
-The `release` workflow then:
+It refuses unless you are on `main`, with nothing uncommitted, level with
+`origin/main`, and the tag is new. Pushing the tag starts the `release`
+workflow, which then:
 
 1. Runs the Go tests.
 2. Imports the Developer ID certificate into a temporary keychain.
 3. Builds `cmd/ush` for darwin/arm64, signs it with the hardened runtime, and
-   notarizes it as a zip (`make release`), then checks Gatekeeper accepts it as
+   notarizes it as a zip (`make notarize`), then checks Gatekeeper accepts it as
    notarized (`make verify`).
 4. Creates the GitHub release with `ush-<version>.zip` and its `.sha256`, with
    notes from this version's `CHANGELOG.md` section when there is one.
@@ -43,7 +46,7 @@ needs adding to their scope.
 
 ```sh
 make dist                                  # bin/dist/ush, unsigned
-make release SIGN_ID="Developer ID Application: … (TEAMID)" NOTARY_PROFILE=…
+make notarize SIGN_ID="Developer ID Application: … (TEAMID)" NOTARY_PROFILE=…
 make verify
 ```
 

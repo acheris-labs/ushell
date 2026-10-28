@@ -107,7 +107,7 @@ jobs:
         run: |
           set -euo pipefail
           : "${DEVID_IDENTITY:?missing DEVID_IDENTITY secret}"
-          make release SIGN_ID="$DEVID_IDENTITY" NOTARY_PROFILE="$NOTARY_PROFILE"
+          make notarize SIGN_ID="$DEVID_IDENTITY" NOTARY_PROFILE="$NOTARY_PROFILE"
 
       - name: Verify what we are about to publish
         run: make verify

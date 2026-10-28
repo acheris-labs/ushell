@@ -1,6 +1,6 @@
 BINDIR ?= $(HOME)/.local/bin
 
-.PHONY: build test install seed ios-acknowledgements test-ios-core test-ios-client ios-project ios-build test-ios-ui test-ios-app testflight dist sign release verify
+.PHONY: build test install seed ios-acknowledgements test-ios-core test-ios-client ios-project ios-build test-ios-ui test-ios-app testflight dist sign notarize verify release
 
 # Build the ush client for this machine.
 build:
@@ -27,10 +27,33 @@ sign: dist
 
 # A bare binary cannot carry a stapled ticket, so the zip goes as notarized
 # and Gatekeeper looks the ticket up online on first run.
-release: sign
+notarize: sign
 	rm -f $(ZIP)
 	ditto -c -k $(DIST)/ush $(ZIP)
 	xcrun notarytool submit $(ZIP) --keychain-profile "$(NOTARY_PROFILE)" --wait
+
+# Tag a release and push the tag; the release workflow builds and ships it.
+# VERSION defaults to the latest tag with its patch number bumped:
+#   make release                 # v0.1.0 -> v0.1.1
+#   make release VERSION=0.2.0
+LAST_TAG = $(shell git describe --tags --abbrev=0 --match 'v*' 2>/dev/null)
+VERSION ?= $(shell echo "$(LAST_TAG)" | awk -F. -v OFS=. \
+  '$$0 == "" { print "0.1.0"; next } { sub(/^v/, "", $$1); $$3++; print }')
+
+release:
+	@echo "$(VERSION)" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$$' \
+	  || { echo "VERSION=$(VERSION) is not x.y.z"; exit 1; }
+	@test "$$(git branch --show-current)" = main || { echo "not on main"; exit 1; }
+	@test -z "$$(git status --porcelain)" || { echo "uncommitted changes"; exit 1; }
+	@git fetch -q origin main --tags
+	@test "$$(git rev-parse HEAD)" = "$$(git rev-parse origin/main)" \
+	  || { echo "main is not origin/main: pull or push first"; exit 1; }
+	@! git rev-parse -q --verify "refs/tags/v$(VERSION)" >/dev/null \
+	  || { echo "v$(VERSION) already exists"; exit 1; }
+	@echo "releasing v$(VERSION) (last: $(or $(LAST_TAG),none))"
+	git tag v$(VERSION)
+	git push -q origin v$(VERSION)
+	@echo "building: gh run watch -R acheris-labs/ushell"
 
 # Fails unless Gatekeeper accepts the binary as notarized, not merely signed.
 verify:
