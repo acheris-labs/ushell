@@ -21,6 +21,12 @@ final class SessionsTests: XCTestCase {
         XCTAssertNil(s[0].viewers, "nobody watching: ushd leaves the field out")
     }
 
+    func testSummaryIsTheDescriptionElseTheCommand() throws {
+        let s = try decodeSessions(Data(json.utf8))
+        XCTAssertEqual(s[1].summary, "staging")
+        XCTAssertEqual(s[2].summary, "claude", "no description: the command")
+    }
+
     func testGroupsByMachineKeepingOrder() throws {
         let s = try decodeSessions(Data(#"""
         [

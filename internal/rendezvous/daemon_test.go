@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -746,5 +747,49 @@ func TestEveryRateLimitsAndCounts(t *testing.T) {
 	want := []string{"x 1", "x 4 (and 2 more since the last report)"}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("logged %q, want %q", got, want)
+	}
+}
+
+func TestDescribeSetsAndClearsADescription(t *testing.T) {
+	h := startDaemon(t)
+	c := h.must(t)
+	if err := writeEntry(h.dir, api); err != nil {
+		t.Fatal(err)
+	}
+	text := base64.StdEncoding.EncodeToString([]byte("pr monitor \x1b[31m"))
+	if _, errOut, code := run(t, c, "describe "+api.ID+" "+text); code != 0 {
+		t.Fatalf("describe exited %d: %s", code, errOut)
+	}
+	if got, _ := readSession(h.dir, api.ID); got.Description != "pr monitor [31m" {
+		t.Fatalf("description = %q, want it set with the escape stripped", got.Description)
+	}
+	if _, errOut, code := run(t, c, "describe "+api.ID); code != 0 {
+		t.Fatalf("describe with no text exited %d: %s", code, errOut)
+	}
+	if got, _ := readSession(h.dir, api.ID); got.Description != "" || got.Name != "api" {
+		t.Fatalf("after clearing: %+v", got)
+	}
+}
+
+func TestDescribeChecksItsArguments(t *testing.T) {
+	h := startDaemon(t)
+	c := h.must(t)
+	if err := writeEntry(h.dir, api); err != nil {
+		t.Fatal(err)
+	}
+	for cmd, want := range map[string]string{
+		"describe":                              "expected a session id",
+		"describe ../../etc/passwd eA==":        "expected a session id",
+		"describe AbCdEfGhIjKlMnOpQrSt eA==":    "no such session",
+		"describe " + api.ID + " not-base64!":   "not base64",
+		"describe " + api.ID + " eA== too many": "expected a session id",
+	} {
+		_, errOut, code := run(t, c, cmd)
+		if code == 0 || !strings.Contains(errOut, want) {
+			t.Errorf("%q: exit %d, stderr %q; want %q", cmd, code, errOut, want)
+		}
+	}
+	if !sessionGone(h.dir, "AbCdEfGhIjKlMnOpQrSt") {
+		t.Error("describing an unknown session must not create it")
 	}
 }

@@ -107,7 +107,7 @@ ush                                     # terminal 2: the menu
 | `ush seed` | print a new random seed |
 | `ush ping` | check that the rendezvous can be reached and logged in to |
 | `ush pair` | show this profile as a QR code for the iOS app (it carries the key: anyone who sees it can join everything) |
-| `Ctrl-]` inside a joined session | open the session panel: viewers, time on, uptime; `b` back to session, `r` refresh the screen, `l` back to list, `n` rename, `d` or `q` disconnect |
+| `Ctrl-]` inside a joined session | open the session panel: viewers, time on, uptime; `b` back to session, `r` refresh the screen, `l` back to list, `n` rename, `e` edit the description (shown in place of the command in the menu and the iOS app; empty shows the command), `d` or `q` disconnect. In the iOS app, long-press a session to edit its description |
 
 What keeps a `-k` session is `--mux`, or `mux = "tmux"` in `~/.ushrc` (top
 level, overridable per profile):

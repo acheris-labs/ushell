@@ -55,6 +55,30 @@ final class ClientTests: XCTestCase {
         XCTAssertTrue(Set(["swift-echo", "swift-other"]).isSubset(of: names), "\(names)")
     }
 
+    func testDescribeSetsAndClearsTheDescription() async throws {
+        let c = try await RendezvousConnection.connect(profile)
+        defer { c.close() }
+        let s = try await session("swift-other", on: c)
+        try await c.describe(sessionID: s.id, as: "pr monitor")
+        let described = try await session("swift-other", on: c)
+        XCTAssertEqual(described.description, "pr monitor")
+        XCTAssertEqual(described.summary, "pr monitor")
+        try await c.describe(sessionID: s.id, as: "")
+        let cleared = try await session("swift-other", on: c)
+        XCTAssertEqual(cleared.description, "")
+    }
+
+    func testDescribingAGoneSessionIsRefused() async throws {
+        let c = try await RendezvousConnection.connect(profile)
+        defer { c.close() }
+        do {
+            try await c.describe(sessionID: "AbCdEfGhIjKlMnOpQrSt", as: "x")
+            XCTFail("describing a session that was never shared should fail")
+        } catch ClientError.commandFailed(_, let message) {
+            XCTAssertTrue(message.contains("no such session"), message)
+        }
+    }
+
     func testJoinTypesAndTheListKeyExitsTen() async throws {
         let c = try await RendezvousConnection.connect(profile)
         defer { c.close() }

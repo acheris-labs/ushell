@@ -100,7 +100,7 @@ func (m *menu) refilter() {
 	} else {
 		keys := make([]string, len(m.all))
 		for i, s := range m.all {
-			keys[i] = s.Name + " " + s.Machine + " " + s.Command
+			keys[i] = s.Name + " " + s.Machine + " " + s.Command + " " + s.Description
 		}
 		m.visible = nil
 		for _, match := range fuzzy.Find(q, keys) {
@@ -278,7 +278,7 @@ func (m *menu) renderList(width, rows int) string {
 		return marker + pad(name, nameW) + "  " + pad(command, cmdW) + "  " +
 			fmt.Sprintf("%*s", viewW, viewers) + "  " + pad(ago, ageW)
 	}
-	out := []string{faint.Render(line("  ", "NAME", "COMMAND", "VIEWERS", "AGE"))}
+	out := []string{faint.Render(line("  ", "NAME", "COMMAND/DESCRIPTION", "VIEWERS", "AGE"))}
 
 	// The tree: a heading for each machine, its sessions on branches below.
 	var tree []string
@@ -297,9 +297,9 @@ func (m *menu) renderList(width, rows int) string {
 		if s.Viewers > 0 {
 			viewers = strconv.Itoa(s.Viewers)
 		}
-		row := line("  ", branch+s.Name, s.Command, viewers, ago)
+		row := line("  ", branch+s.Name, s.summary(), viewers, ago)
 		if i == m.cursor {
-			row = selectedRow.Render(line("▌ ", branch+s.Name, s.Command, viewers, ago))
+			row = selectedRow.Render(line("▌ ", branch+s.Name, s.summary(), viewers, ago))
 			cursorRow = len(tree)
 		}
 		tree = append(tree, row)

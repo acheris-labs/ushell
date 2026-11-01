@@ -25,18 +25,23 @@ func key(s string) tea.KeyMsg {
 }
 
 func newTestPanel(rename func(string) error) *panel {
+	return newTestPanelDescribing(rename, nil)
+}
+
+func newTestPanelDescribing(rename, describe func(string) error) *panel {
 	joined := fixed.Add(-12 * time.Minute)
 	return newPanel(panelInfo{
-		session: session{Name: "api", Machine: "lumen", Command: "claude", StartedEpoch: fixed.Add(-3*time.Hour - 4*time.Minute).Unix()},
+		session: session{Name: "api", Machine: "lumen", Command: "claude", Description: "old",
+			StartedEpoch: fixed.Add(-3*time.Hour - 4*time.Minute).Unix()},
 		viewers: 2,
 		joined:  joined,
-	}, rename, func() time.Time { return fixed })
+	}, rename, describe, func() time.Time { return fixed })
 }
 
 func TestPanelShowsTheSession(t *testing.T) {
 	v := newTestPanel(nil).View()
 	for _, want := range []string{"api", "lumen", "claude", "2 (incl. you)", "12m", "3h 04m",
-		"back to session", "back to list", "refresh", "rename", "d/q  disconnect"} {
+		"back to session", "back to list", "refresh", "rename", "edit description", "description     old", "d/q  disconnect"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("panel missing %q:\n%s", want, v)
 		}
@@ -98,6 +103,72 @@ func TestPanelRenameRejectsBadNames(t *testing.T) {
 	}
 	if _, cmd := p.Update(key("esc")); isQuit(cmd) {
 		t.Fatal("esc while renaming should cancel the rename, not leave the panel")
+	}
+}
+
+func TestPanelEditsTheDescription(t *testing.T) {
+	var got string
+	p := newTestPanelDescribing(nil, func(s string) error { got = s; return nil })
+	p.Update(key("e"))
+	if p.input.Value() != "old" {
+		t.Fatalf("editor holds %q, want the current description", p.input.Value())
+	}
+	for _, r := range " and new" {
+		p.Update(key(string(r)))
+	}
+	if _, cmd := p.Update(key("enter")); isQuit(cmd) {
+		t.Fatal("describing should stay in the panel")
+	}
+	if got != "old and new" || !strings.Contains(p.View(), "old and new") {
+		t.Fatalf("description not applied: got %q\n%s", got, p.View())
+	}
+	if p.editing != editingNothing {
+		t.Fatal("enter should close the editor")
+	}
+}
+
+func TestPanelDescriptionEscCancels(t *testing.T) {
+	called := false
+	p := newTestPanelDescribing(nil, func(string) error { called = true; return nil })
+	p.Update(key("e"))
+	p.Update(key("x"))
+	if _, cmd := p.Update(key("esc")); isQuit(cmd) || called {
+		t.Fatalf("esc should cancel without saving or leaving (saved=%v)", called)
+	}
+}
+
+func TestPanelEditorsDontBleedIntoEachOther(t *testing.T) {
+	var name string
+	p := newTestPanelDescribing(func(n string) error { name = n; return nil }, func(string) error { return nil })
+	p.Update(key("e"))
+	p.Update(key("esc"))
+	p.Update(key("n"))
+	if p.input.Value() != "" || !strings.Contains(p.View(), "new name: ") {
+		t.Fatalf("rename after describe should start empty with its own prompt:\n%s", p.View())
+	}
+	for _, r := range "api-v2" {
+		p.Update(key(string(r)))
+	}
+	p.Update(key("enter"))
+	if name != "api-v2" {
+		t.Fatalf("rename got %q", name)
+	}
+}
+
+func TestDescribeSessionRewritesTheRegistry(t *testing.T) {
+	dir := t.TempDir()
+	writeSession(t, dir, api)
+	if err := describeSession(dir, api.ID, "pr monitor\x1b"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := readSession(dir, api.ID); got.Description != "pr monitor" || got.Name != "api" {
+		t.Fatalf("registry after describe: %+v", got)
+	}
+	if err := describeSession(dir, "NOSUCHSESSION0000000", "x"); err == nil {
+		t.Fatal("describing a vanished session should fail")
+	}
+	if !sessionGone(dir, "NOSUCHSESSION0000000") {
+		t.Fatal("describing a vanished session must not bring its entry back")
 	}
 }
 

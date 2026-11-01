@@ -60,6 +60,12 @@ final class RendezvousState: Identifiable {
         }
     }
 
+    /// Sets a session's description, then refreshes so the list shows it.
+    func describe(_ session: SessionInfo, as text: String) async throws {
+        try await connection().describe(sessionID: session.id, as: text)
+        await refresh()
+    }
+
     func disconnect() {
         recovery?.cancel()
         recovery = nil

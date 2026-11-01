@@ -326,6 +326,24 @@ class MenuTest(unittest.TestCase):
         menu.send(b"l")
         self.assertTrue(menu.wait_for('left "newname"', 8), menu.text[-600:])
 
+    def test_panel_description_replaces_the_command_in_the_list(self):
+        self.share("noted")
+        menu = self.term()
+        self.join_first(menu, "noted")
+        menu.send(b"\x1d")
+        self.assertTrue(menu.wait_for("edit description", 8), menu.text)
+        menu.send(b"e")
+        time.sleep(0.5)
+        menu.send(b"pr monitor\r")
+        self.assertTrue(menu.wait_for("saved", 8), menu.text[-600:])
+        menu.send(b"l")
+        self.assertTrue(menu.wait_for('left "noted"', 8), menu.text[-600:])
+        # The list drawn after leaving, not the text typed into the panel.
+        menu.read(1)
+        after = menu.text[menu.text.rfind('left "noted"'):]
+        self.assertIn("COMMAND/DESCRIPTION", after)
+        self.assertIn("pr monitor", after)
+
     def test_panel_refresh_repaints_and_resumes(self):
         # Ctrl-] r nudges the window size so the program redraws; on a bare
         # shell there is nothing to redraw, so check it returns to the session.

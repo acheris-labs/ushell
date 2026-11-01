@@ -3,6 +3,7 @@ package rendezvous
 import (
 	"crypto/ed25519"
 	"crypto/subtle"
+	"encoding/base64"
 	"errors"
 	"flag"
 	"fmt"
@@ -222,6 +223,8 @@ func (d *Daemon) handle(sess gssh.Session) {
 		_ = sess.Exit(0)
 	case "join":
 		d.join(sess, args[1:])
+	case "describe":
+		d.describe(sess, args[1:])
 	default:
 		d.refuse(sess, fmt.Sprintf("unsupported command: %s", verb))
 	}
@@ -299,6 +302,33 @@ func (d *Daemon) join(sess gssh.Session, args []string) {
 		return
 	}
 	d.runChild(sess, "-session", id)
+}
+
+// describe sets a session's description: describe ID [BASE64]. The text is
+// base64, as a share's payload is, so it needs no quoting; leaving it out
+// clears the description.
+func (d *Daemon) describe(sess gssh.Session, args []string) {
+	if len(args) < 1 || len(args) > 2 || !validSessionID.MatchString(args[0]) {
+		d.refuse(sess, "describe: expected a session id and base64 text")
+		return
+	}
+	var text []byte
+	if len(args) == 2 {
+		var err error
+		if text, err = base64.StdEncoding.DecodeString(args[1]); err != nil {
+			d.refuse(sess, "describe: text is not base64")
+			return
+		}
+	}
+	if sessionGone(d.Dir, args[0]) {
+		d.refuse(sess, "describe: no such session")
+		return
+	}
+	if err := describeSession(d.Dir, args[0], string(text)); err != nil {
+		d.refuse(sess, fmt.Sprintf("describe: %v", err))
+		return
+	}
+	_ = sess.Exit(0)
 }
 
 // runChild runs this binary again, on a real pty, for one session.

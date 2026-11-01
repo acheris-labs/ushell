@@ -232,7 +232,7 @@ func TestListIsATreeOfMachines(t *testing.T) {
 			rows = append(rows, strings.Join(f[:min(len(f), 2)], " "))
 		}
 	}
-	want := []string{"NAME COMMAND", "lumen", "└ api", "umber", "├ aaa", "└ build"}
+	want := []string{"NAME COMMAND/DESCRIPTION", "lumen", "└ api", "umber", "├ aaa", "└ build"}
 	if !slices.Equal(rows[1:7], want) {
 		t.Fatalf("tree rows = %q, want %q", rows[1:7], want)
 	}
@@ -300,5 +300,28 @@ func TestCardSaysWhoIsWatching(t *testing.T) {
 	}
 	if c := card(build, fixed, 50); !strings.Contains(c, "nobody") {
 		t.Errorf("card should say nobody is watching:\n%s", c)
+	}
+}
+
+func TestTheListShowsTheDescriptionInsteadOfTheCommand(t *testing.T) {
+	described := api
+	described.Description = "pr monitor"
+	m, _ := newTestMenu(t, described, build)
+	list := listPart(m.View())
+	if !strings.Contains(list, "pr monitor") || strings.Contains(list, "claude") {
+		t.Errorf("api's row should show its description, not its command:\n%s", list)
+	}
+	if !strings.Contains(list, "make watch") {
+		t.Errorf("build has no description, so its row shows its command:\n%s", list)
+	}
+}
+
+func TestTypingFiltersOnTheDescription(t *testing.T) {
+	described := api
+	described.Description = "pr monitor"
+	m, _ := newTestMenu(t, described, build)
+	typeText(m, "monitor")
+	if len(m.visible) != 1 || m.visible[0].ID != api.ID {
+		t.Fatalf("visible = %+v, want only api", m.visible)
 	}
 }

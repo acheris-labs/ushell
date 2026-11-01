@@ -1,4 +1,5 @@
 import SwiftUI
+import USHClient
 import USHCore
 
 struct SidebarView: View {
@@ -148,6 +149,9 @@ struct SessionRow: View {
     @Environment(Workspace.self) private var workspace
     let rendezvous: RendezvousState
     let session: SessionInfo
+    @State private var describing = false
+    @State private var draft = ""
+    @State private var problem: String?
 
     private var tab: TerminalTab? { workspace.tab(for: session, in: rendezvous) }
     private var front: Bool { tab.map { $0.id == workspace.frontID } ?? false }
@@ -160,7 +164,7 @@ struct SessionRow: View {
                 Image(systemName: tab == nil ? "circle" : "circle.inset.filled")
                 VStack(alignment: .leading) {
                     Text(session.name).bold()
-                    Text(session.command).font(.caption).foregroundStyle(.secondary)
+                    Text(session.summary).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 if tab?.marks.bell == true { Image(systemName: "bell.fill").foregroundStyle(.orange) }
@@ -179,10 +183,39 @@ struct SessionRow: View {
         .listRowBackground(front ? machineColor(session.machine).opacity(0.25) : nil)
         .accessibilityIdentifier("session.\(session.name)")
         .accessibilityValue(front ? "front" : tab != nil ? "joined" : "")
+        .contextMenu {
+            Button("Edit Description…", systemImage: "pencil") {
+                draft = session.description
+                describing = true
+            }
+        }
+        .alert("Description for \(session.name)", isPresented: $describing) {
+            TextField(session.command, text: $draft)
+                .accessibilityIdentifier("description.field")
+            Button("Save") { save(draft) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Everyone sees it in place of the command. Leave it empty to show the command.")
+        }
+        .alert("Couldn't save the description", isPresented: Binding(get: { problem != nil }, set: { if !$0 { problem = nil } })) {
+            Button("OK") {}
+        } message: {
+            Text(problem ?? "")
+        }
         // With no tabs, this is where a session closes.
         .swipeActions {
             if let tab {
                 Button("Close", role: .destructive) { workspace.close(tab) }
+            }
+        }
+    }
+
+    private func save(_ text: String) {
+        Task {
+            do {
+                try await rendezvous.describe(session, as: text.trimmingCharacters(in: .whitespaces))
+            } catch {
+                problem = (error as? ClientError)?.description ?? error.localizedDescription
             }
         }
     }

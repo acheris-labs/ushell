@@ -70,15 +70,27 @@ public final class RendezvousConnection: @unchecked Sendable {
     public func close() { channel.close(promise: nil) }
 
     public func list(timeout: TimeAmount = .seconds(10)) async throws -> [SessionInfo] {
+        try decodeSessions(Data(try await run("list", timeout: timeout)))
+    }
+
+    /// Sets a session's description for everyone; empty clears it. ushd keeps
+    /// printable ASCII and the first 80 bytes.
+    public func describe(sessionID: String, as text: String, timeout: TimeAmount = .seconds(10)) async throws {
+        _ = try await run("describe \(sessionID) \(Data(text.utf8).base64EncodedString())", timeout: timeout)
+    }
+
+    /// Runs one command without a terminal and returns its stdout, or throws
+    /// what it said on stderr if it failed.
+    private func run(_ command: String, timeout: TimeAmount) async throws -> [UInt8] {
         try await withDeadline(timeout) {
             let out = Collected(), err = Collected()
-            let (_, finished) = try await self.exec("list", pty: nil,
+            let (_, finished) = try await self.exec(command, pty: nil,
                                                     onStdout: { out.append($0) }, onStderr: { err.append($0) })
             let code = try await finished.get()
             guard code == 0 else {
                 throw ClientError.commandFailed(code: code, message: err.text.trimmingCharacters(in: .whitespacesAndNewlines))
             }
-            return try decodeSessions(Data(out.bytes))
+            return out.bytes
         }
     }
 

@@ -20,6 +20,9 @@ public struct SessionInfo: Decodable, Sendable, Equatable, Identifiable {
         case readOnly = "read_only", startedEpoch = "started_epoch", viewers
     }
 
+    /// What its row shows: the description, or the command when there is none.
+    public var summary: String { description.isEmpty ? command : description }
+
     /// How long ago it started, as the menu shows it: 42s / 7m / 3h / 2d.
     public func age(now: Date) -> String {
         let s = max(Int64(now.timeIntervalSince1970) - startedEpoch, 0)

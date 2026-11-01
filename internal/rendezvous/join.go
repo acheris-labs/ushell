@@ -237,11 +237,12 @@ func showPanel(t target, id string, joined time.Time, tty *os.File, out io.Write
 	if t.viewersDir != "" {
 		info.viewers = max(countViewers(t.viewersDir, id), 1)
 	}
-	var rename func(string) error
+	var rename, describe func(string) error
 	if t.registryDir != "" {
 		rename = func(name string) error { return renameSession(t.registryDir, id, name) }
+		describe = func(text string) error { return describeSession(t.registryDir, id, text) }
 	}
-	p := newPanel(info, rename, time.Now)
+	p := newPanel(info, rename, describe, time.Now)
 	if _, err := tea.NewProgram(p, tea.WithAltScreen(), tea.WithInput(tty), tea.WithOutput(out)).Run(); err != nil {
 		return choiceBack
 	}

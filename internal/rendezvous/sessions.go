@@ -78,21 +78,33 @@ func itoa(n int64) string { return strconv.FormatInt(n, 10) }
 // renameSession changes a session's name in the registry, which is what every
 // menu shows. The sharer's own USH_SESSION keeps the old name.
 func renameSession(dir, id, name string) error {
+	return setField(dir, id, "name", name)
+}
+
+// describeSession changes a session's description, cut down as a sharer's
+// would be. Empty clears it.
+func describeSession(dir, id, text string) error {
+	return setField(dir, id, "description", clean(text, maxDescription))
+}
+
+// setField rewrites one field of a registry entry, keeping every other field,
+// including ones this version does not know.
+func setField(dir, id, key, value string) error {
 	path := filepath.Join(dir, id+".json")
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
-	var entry map[string]any // keep every field, not just the ones we know
+	var entry map[string]any
 	if err := json.Unmarshal(b, &entry); err != nil {
 		return err
 	}
-	entry["name"] = name
+	entry[key] = value
 	out, err := json.Marshal(entry)
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(dir, ".rename-*")
+	tmp, err := os.CreateTemp(dir, ".update-*")
 	if err != nil {
 		return err
 	}
@@ -109,6 +121,14 @@ func renameSession(dir, id, name string) error {
 		return err
 	}
 	return os.Rename(tmp.Name(), path)
+}
+
+// summary is what a session's row shows: its description, or else its command.
+func (s session) summary() string {
+	if s.Description != "" {
+		return s.Description
+	}
+	return s.Command
 }
 
 // readSession reads one registry entry.
