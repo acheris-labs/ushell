@@ -6,6 +6,7 @@ Needs the rendezvous up (docker compose up -d, which needs .env from
 """
 
 import fcntl
+import json
 import os
 import shutil
 import pty
@@ -511,6 +512,61 @@ class MenuTest(unittest.TestCase):
         kept = subprocess.run([USH, "attach", "--list"],
                               env={**os.environ, **self.env}, capture_output=True, text=True).stdout
         self.assertIn(name, kept, "the session itself should still be kept")
+
+    def entry(self, match, seconds=10):
+        """The first registry entry match accepts, or None."""
+        end = time.time() + seconds
+        while time.time() < end:
+            out = subprocess.run(
+                ["ssh", "-i", self.key, "-p", PORT, "-o", "StrictHostKeyChecking=no",
+                 "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR",
+                 "ush@127.0.0.1", "list"],
+                capture_output=True, text=True,
+            ).stdout
+            for e in json.loads(out or "[]"):
+                if match(e):
+                    return e
+            time.sleep(0.3)
+        return None
+
+    def test_a_kept_session_is_relabelled_from_the_sharing_side(self):
+        # Ctrl-] in the sharing terminal, then ush session set from a shell:
+        # both go to the process holding the share, which tells the rendezvous.
+        name = "relabel"
+        sharer = self.term("share", "-k", "-n", name, "--", "sleep", "600")
+        self.addCleanup(self.gone, name)
+        self.addCleanup(self.gone, "relabelled")
+        self.addCleanup(subprocess.run, [USH, "stop", name],
+                        env={**os.environ, **self.env}, capture_output=True)
+        self.assertTrue(self.registered(name), "the kept session never registered")
+
+        sharer.send(b"\x1d")
+        self.assertTrue(sharer.wait_for("e  description", 8), sharer.text)
+        sharer.send(b"e")
+        self.assertTrue(sharer.wait_for("New description", 8), sharer.text)
+        sharer.send(b"from ctrl-bracket\r")
+        self.assertTrue(sharer.wait_for("saved; the menu gets it", 8), sharer.text)
+        sharer.send(b"x")  # back to the session
+        self.assertIsNotNone(
+            self.entry(lambda e: e["name"] == name and e["description"] == "from ctrl-bracket"),
+            "the description typed at Ctrl-] never reached the rendezvous")
+
+        done = subprocess.run([USH, "session", "set", "-n", "relabelled", name],
+                              env={**os.environ, **self.env}, capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIsNotNone(
+            self.entry(lambda e: e["name"] == "relabelled" and e["description"] == "from ctrl-bracket"),
+            "ush session set never reached the rendezvous")
+        self.assertTrue(sharer.alive(), "the sharing terminal should still be attached")
+
+    def test_a_plain_share_is_relabelled_from_inside_it(self):
+        # No session named: the shell inside has $USH_SESSION.
+        sharer = self.share("insider")
+        sharer.send(f"{USH} session set -d 'set from inside'\r".encode())
+        self.assertTrue(sharer.wait_for("insider will be listed as insider: set from inside", 8), sharer.text)
+        self.assertIsNotNone(
+            self.entry(lambda e: e["name"] == "insider" and e["description"] == "set from inside"),
+            "ush session set from inside the share never reached the rendezvous")
 
     def test_empty_menu_refreshes_by_itself(self):
         menu = self.term()

@@ -8,7 +8,7 @@ import (
 )
 
 // Info is what the menu shows about a session. It is a snapshot taken when the
-// session starts.
+// session starts; the name and description can change after, through a Label.
 type Info struct {
 	Name        string
 	Description string

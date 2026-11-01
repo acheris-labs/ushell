@@ -72,6 +72,9 @@ func keepSharing(cfg config.Config, o options, logPath string) error {
 	attach := o
 	attach.command = tm.attachCommand(o.name)
 	attach.guestCommand = tm.guestCommand(o.name, o.readOnly)
+	var closeControl func()
+	attach.label, closeControl = controlled(o.name, o.desc, logLines(logPath, "ush share "+o.name))
+	defer closeControl()
 
 	var wait backoff
 	for {
@@ -532,14 +535,10 @@ func shareForever(cfg config.Config, o options, logPath string) {
 	for !keep.Exists(o.name) {
 		time.Sleep(20 * time.Millisecond) // the pty comes up a moment later
 	}
-	logf := func(format string, args ...any) {
-		f, err := openLog(logPath)
-		if err != nil {
-			return
-		}
-		defer f.Close()
-		fmt.Fprintf(f, "ush keep %s: "+format+"\n", append([]any{o.name}, args...)...)
-	}
+	logf := logLines(logPath, "ush keep "+o.name)
+	var closeControl func()
+	o.label, closeControl = controlled(o.name, o.desc, logf)
+	defer closeControl()
 	var wait backoff
 	for {
 		started := time.Now()
@@ -554,6 +553,19 @@ func shareForever(cfg config.Config, o options, logPath string) {
 		delay := wait.next(time.Since(started))
 		logf("%v; reconnecting in %s", err, delay)
 		time.Sleep(delay)
+	}
+}
+
+// logLines appends to the log, a line at a time: for what runs while
+// something else owns the terminal.
+func logLines(logPath, prefix string) func(string, ...any) {
+	return func(format string, args ...any) {
+		f, err := openLog(logPath)
+		if err != nil {
+			return
+		}
+		defer f.Close()
+		fmt.Fprintf(f, "%s: "+format+"\n", append([]any{prefix}, args...)...)
 	}
 }
 

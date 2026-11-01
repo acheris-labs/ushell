@@ -1,6 +1,7 @@
 package rendezvous
 
 import (
+	"bufio"
 	"crypto/ed25519"
 	"crypto/subtle"
 	"encoding/base64"
@@ -77,6 +78,11 @@ type Daemon struct {
 
 	Self   string      // this binary, re-executed for each session
 	Logger *log.Logger // nil means the standard logger
+
+	// EditPoll is how often a share's entry is checked for edits to pass to
+	// its sharer; zero means every 2s. The panel that makes them is another
+	// process, so the file is the only thing both can see.
+	EditPoll time.Duration
 
 	sharers     sharers
 	closed      sync.Map // gssh.Session -> chan struct{}, closed with its channel
@@ -274,15 +280,121 @@ func (d *Daemon) share(sess gssh.Session, args []string) {
 	fmt.Fprintf(sess, "registered %s (%s)\n", s.Name, s.ID)
 	d.logf("ushd: registered %s (%s) from %s", s.Name, s.ID, sess.RemoteAddr())
 
-	// Block until the sharer goes away, whichever way it goes.
+	// Block until the sharer goes away, whichever way it goes. Meanwhile
+	// edits pass both ways: the sharer's arrive on stdin, and the ones made
+	// here go back to it.
+	known := &label{name: s.Name, description: s.Description}
 	gone := make(chan struct{})
-	go func() { _, _ = io.Copy(io.Discard, sess); close(gone) }()
+	go func() {
+		defer close(gone)
+		lines := bufio.NewScanner(sess)
+		for lines.Scan() {
+			if name, desc, ok := known.take(d.Dir, s.ID, lines.Text()); ok {
+				d.logf("ushd: %s (%s) relabelled by its sharer: %q, %q", s.Name, s.ID, name, desc)
+			}
+		}
+		_, _ = io.Copy(io.Discard, sess) // a line too long ends the scanning, not the share
+	}()
+	// Not waited for: a sharer too old to read the updates could leave a
+	// write blocked, and that must not hold up the deregistration.
+	stop := make(chan struct{})
+	defer close(stop)
+	every := d.EditPoll
+	if every == 0 {
+		every = 2 * time.Second
+	}
+	go known.relay(sess, d.Dir, s.ID, every, stop)
 	select {
 	case <-gone:
 	case <-sess.Context().Done():
 	}
+	known.end()
 	d.logf("ushd: deregistered %s (%s)", s.Name, s.ID)
 	_ = sess.Exit(0)
+}
+
+// label is the name and description a sharer was last sent. The sharer
+// keeps them, and sends them again when it re-registers; without that, every
+// reconnect would put back what it first registered.
+type label struct {
+	mu                sync.Mutex
+	name, description string
+	ended             bool // the share is gone: its entry must not be written again
+}
+
+// end stops take from writing the entry, which is about to be removed: a
+// write landing after the removal would list a share that is not there.
+func (l *label) end() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.ended = true
+}
+
+// take applies an "update BASE64" line from the sharer: base64 of key=value
+// lines, as a share's payload is, carrying only the fields it edited. A bad
+// name is ignored and the description is cut down, as at registration. It
+// reports whether the entry changed.
+func (l *label) take(dir, id, line string) (name, description string, changed bool) {
+	blob, ok := strings.CutPrefix(line, "update ")
+	raw, err := base64.StdEncoding.DecodeString(blob)
+	if !ok || err != nil {
+		return "", "", false
+	}
+	l.mu.Lock() // so relay never sends the entry half written
+	defer l.mu.Unlock()
+	now, found := readSession(dir, id)
+	if l.ended || !found {
+		return "", "", false
+	}
+	name, description = now.Name, now.Description
+	for _, kv := range strings.Split(string(raw), "\n") {
+		key, value, _ := strings.Cut(kv, "=")
+		switch key {
+		case "name":
+			if validName.MatchString(value) {
+				name = value
+			}
+		case "description":
+			description = clean(value, maxDescription)
+		}
+	}
+	if name == now.Name && description == now.Description {
+		return name, description, false
+	}
+	if renameSession(dir, id, name) != nil || describeSession(dir, id, description) != nil {
+		return "", "", false
+	}
+	return name, description, true
+}
+
+// relay tells the sharer when its entry's name or description changes, as
+// "update BASE64" lines in the same format. That includes the sharer's own
+// edits, as they were saved: an edit from the menu can cross one from the
+// sharer, and the last word has to be the entry's, or the two disagree.
+func (l *label) relay(w io.Writer, dir, id string, every time.Duration, stop <-chan struct{}) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-t.C:
+		}
+		l.mu.Lock()
+		now, ok := readSession(dir, id)
+		changed := ok && (now.Name != l.name || now.Description != l.description)
+		if changed {
+			l.name, l.description = now.Name, now.Description
+		}
+		l.mu.Unlock()
+		if !changed {
+			continue
+		}
+		blob := base64.StdEncoding.EncodeToString([]byte("name=" + now.Name + "\ndescription=" + now.Description + "\n"))
+		if _, err := fmt.Fprintf(w, "update %s\n", blob); err != nil {
+			return
+		}
+	}
 }
 
 // join attaches directly to one session, for scripting and tests. It checks

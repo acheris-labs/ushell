@@ -34,7 +34,7 @@ import (
 
 // validName starts with a letter or digit, so a name is never read as a flag
 // by ush attach, herdr or tmux.
-var validName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$`)
+var validName = register.ValidName
 
 // nameMisfits are the runs defaultName turns into a dash; dots too, which
 // tmux session names can't hold.
@@ -88,7 +88,10 @@ processes a debugger may attach to: not Apple's own binaries (/bin/bash,
 old window, and its children stay there.
 
 ush attach reconnects to a kept session (--list shows them); ush stop ends one.
-Ctrl-] leaves a session running, whether you are attached or joined.
+Ctrl-] leaves a session running, whether you are attached or joined; in a
+kept, shared one it also renames it (n) or edits its description (e).
+ush session set [-n NAME] [-d DESCRIPTION] [SESSION] does the same from a
+shell: inside the session, SESSION defaults to $USH_SESSION.
 ush init adds a profile to the config, and generates the key if needed.
 ush seed prints a new random seed for USH_SEED / ush init --seed.
 ush ping checks that the rendezvous can be reached and logged in to.
@@ -122,6 +125,10 @@ type options struct {
 	displayCommand []string
 	// env is added to command's environment: how $SHELL is told what to run.
 	env []string
+	// label is the name and description the share is listed under, made by
+	// whoever shares in a loop so that edits outlive each pass. nil has
+	// share make its own.
+	label *register.Label
 }
 
 func main() {
@@ -157,6 +164,9 @@ func run() int {
 	}
 	if len(os.Args) > 1 && os.Args[1] == "stop" {
 		return runStop(os.Args[2:])
+	}
+	if len(os.Args) > 1 && os.Args[1] == "session" {
+		return runSession(os.Args[2:], os.Getenv, os.Stdout)
 	}
 	if len(os.Args) == 2 && os.Args[1] == "seed" {
 		s, err := psk.NewSeed()
@@ -462,6 +472,14 @@ func share(cfg config.Config, o options, logPath string) error {
 		ReadOnly:    readOnly,
 	}
 
+	if o.label == nil {
+		var closeControl func()
+		o.label, closeControl = controlled(name, desc, func(format string, args ...any) {
+			logger.Info(fmt.Sprintf(format, args...))
+		})
+		defer closeControl()
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 	regCtx, endRegistration := context.WithCancel(ctx)
@@ -488,7 +506,8 @@ func share(cfg config.Config, o options, logPath string) error {
 			Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
 			HostKeyCallback: hostKeys,
 		},
-		Command:  register.Command(info),
+		Info:     info,
+		Label:    o.label,
 		OnViewer: sess.Accept,
 	}, func(format string, args ...any) {
 		logger.Info(fmt.Sprintf(format, args...))

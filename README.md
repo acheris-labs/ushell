@@ -101,6 +101,8 @@ ush                                     # terminal 2: the menu
 | `ush share -k --mux tmux -n api` | kept by tmux (or herdr) instead of ush itself; see below |
 | `ush adopt 4242 -n api` | move a process already running elsewhere into a share in this window. macOS only, and not for Apple's own binaries or hardened apps like `claude`: lldb is refused. Its old window still owns `^C`, `^Z` and hangup, and its children stay there |
 | `ush attach api` / `ush stop api` | get back to a session ush keeps, or end it |
+| `ush session set -n api-v2 -d "pr monitor"` | rename it or change its description in the menu, from the sharing machine; inside the session it needs no name (`$USH_SESSION`), elsewhere add it last. Works while the rendezvous is away: the share sends it when it reconnects. `-d ''` clears. The new name is only the menu's; `ush attach` and `ush stop` take the one it started with |
+| `Ctrl-]` in a session ush keeps | asks whether to detach (`d`); on a shared one, `n` renames it and `e` edits its description, as `ush session set` does |
 | `ush --profile work` | use another profile from `~/.ushrc` |
 | `ush init` | add a profile to `~/.ushrc` (creating it), generating the key if missing |
 | `ush init --seed` | same, deriving the key from the shared seed (paste the `USH_SEED` value) |
@@ -126,8 +128,9 @@ cron job.
 With `-k`, a rendezvous restart or network drop never ends the *attach*: the
 registration reconnects on its own in the background (backoff 1s → 30s),
 logged rather than printed, so nothing interrupts your screen. It reappears
-under the same name with a new session id, so viewers pick it from the list
-again. The attach ends when the command exits or when you detach (`Ctrl-]`,
+under the same name and description, including any rename or description
+edit made from the menu, with a new session id, so viewers pick it from the
+list again. The attach ends when the command exits or when you detach (`Ctrl-]`,
 which asks first with `--mux ush`: `d` leaves, any other key goes back; or
 tmux's own detach key); the session keeps running after a detach.
 

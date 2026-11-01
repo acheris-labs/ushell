@@ -76,6 +76,8 @@ func startDaemonRunning(t *testing.T, self string) *daemonHarness {
 		User:    "ush",
 		Self:    self,
 		Logger:  log.New(logs, "", 0),
+		// Edits reach a sharer within a test's patience, not a person's.
+		EditPoll: 20 * time.Millisecond,
 	}
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -791,5 +793,143 @@ func TestDescribeChecksItsArguments(t *testing.T) {
 	}
 	if !sessionGone(h.dir, "AbCdEfGhIjKlMnOpQrSt") {
 		t.Error("describing an unknown session must not create it")
+	}
+}
+
+func TestEditsGoBackToTheSharer(t *testing.T) {
+	h := startDaemon(t)
+	c := h.must(t)
+	sess, err := c.NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+	stdout, err := sess.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sess.StdinPipe(); err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Start("share " + payload("name=api", "description=old", "machine=umber")); err != nil {
+		t.Fatal(err)
+	}
+	r := bufio.NewReader(stdout)
+	ack, _ := r.ReadString('\n')
+	m := regexp.MustCompile(`^registered api \(([A-Za-z0-9]{20})\)\n$`).FindStringSubmatch(ack)
+	if m == nil {
+		t.Fatalf("acknowledgement = %q", ack)
+	}
+
+	next := func() string {
+		t.Helper()
+		lines := make(chan string, 1)
+		go func() { l, _ := r.ReadString('\n'); lines <- l }()
+		select {
+		case l := <-lines:
+			blob, ok := strings.CutPrefix(strings.TrimSuffix(l, "\n"), "update ")
+			raw, err := base64.StdEncoding.DecodeString(blob)
+			if !ok || err != nil {
+				t.Fatalf("not an update line: %q", l)
+			}
+			return string(raw)
+		case <-time.After(5 * time.Second):
+			t.Fatal("no update reached the sharer")
+			return ""
+		}
+	}
+	if err := describeSession(h.dir, m[1], "pr monitor"); err != nil {
+		t.Fatal(err)
+	}
+	if got := next(); got != "name=api\ndescription=pr monitor\n" {
+		t.Fatalf("after describe: %q", got)
+	}
+	if err := renameSession(h.dir, m[1], "api-v2"); err != nil {
+		t.Fatal(err)
+	}
+	if got := next(); got != "name=api-v2\ndescription=pr monitor\n" {
+		t.Fatalf("after rename: %q", got)
+	}
+}
+
+func TestTheSharerCanRelabelItsShare(t *testing.T) {
+	h := startDaemon(t)
+	c := h.must(t)
+	sess, err := c.NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+	stdout, err := sess.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdin, err := sess.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Start("share " + payload("name=api", "machine=umber")); err != nil {
+		t.Fatal(err)
+	}
+	r := bufio.NewReader(stdout)
+	ack, _ := r.ReadString('\n')
+	m := regexp.MustCompile(`^registered api \(([A-Za-z0-9]{20})\)\n$`).FindStringSubmatch(ack)
+	if m == nil {
+		t.Fatalf("acknowledgement = %q", ack)
+	}
+	update := func(raw string) {
+		t.Helper()
+		if _, err := fmt.Fprintf(stdin, "update %s\n", base64.StdEncoding.EncodeToString([]byte(raw))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	waitFor := func(name, desc string) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			if s, _ := readSession(h.dir, m[1]); s.Name == name && s.Description == desc {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		s, _ := readSession(h.dir, m[1])
+		t.Fatalf("entry is %q, %q; want %q, %q", s.Name, s.Description, name, desc)
+	}
+
+	update("name=api-v2\ndescription=pr monitor\x1b[31m\n")
+	waitFor("api-v2", "pr monitor[31m")
+	update("name=../../etc\ndescription=still here\n") // a bad name is ignored, not the line
+	waitFor("api-v2", "still here")
+
+	// The sharer hears its entry as saved, its own edits included, and then
+	// the menu's: the last line it gets is always the entry as it is.
+	if err := describeSession(h.dir, m[1], "from the menu"); err != nil {
+		t.Fatal(err)
+	}
+	lines := make(chan string, 64) // never blocks the reader once the test is done
+	go func() {
+		for {
+			l, err := r.ReadString('\n')
+			if err != nil {
+				return
+			}
+			select {
+			case lines <- l:
+			default:
+			}
+		}
+	}()
+	var heard []string
+	for {
+		select {
+		case l := <-lines:
+			raw, _ := base64.StdEncoding.DecodeString(strings.TrimPrefix(strings.TrimSpace(l), "update "))
+			heard = append(heard, string(raw))
+			if string(raw) == "name=api-v2\ndescription=from the menu\n" {
+				return
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("the menu's edit never reached the sharer; it heard %q", heard)
+		}
 	}
 }

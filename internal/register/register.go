@@ -18,9 +18,13 @@ import (
 
 // Target is where and how to register.
 type Target struct {
-	Addr    string
-	Config  *ssh.ClientConfig
-	Command string
+	Addr   string
+	Config *ssh.ClientConfig
+	Info   Info
+	// Label, if set, supplies the name and description in place of Info's,
+	// and outlives this registration: whoever made it can edit it, and keep
+	// it across another Register.
+	Label *Label
 	// OnViewer is called for every viewer channel the rendezvous opens on
 	// the registration connection, including the ones after a reconnect.
 	OnViewer func(ssh.NewChannel)
@@ -48,6 +52,9 @@ var ErrRetrying = errors.New("retrying in the background")
 // including SIGKILL, the kernel closes the socket, the rendezvous drops the
 // entry, and every viewer's channel closes with it.
 func Register(ctx context.Context, t Target, logf func(string, ...any)) error {
+	if t.Label == nil {
+		t.Label = NewLabel(t.Info.Name, t.Info.Description)
+	}
 	c, err := open(ctx, t, logf)
 	if err != nil && !unreachable(err) {
 		return err
@@ -138,18 +145,22 @@ func open(ctx context.Context, t Target, logf func(string, ...any)) (*ssh.Client
 		client.Close()
 		return nil, err
 	}
-	// Never written to. The rendezvous blocks reading it, and the entry lives
-	// until it sees EOF.
-	if _, err := sess.StdinPipe(); err != nil {
+	// Carries edits made here. The rendezvous reads it until EOF, and the
+	// entry lives that long.
+	stdin, err := sess.StdinPipe()
+	if err != nil {
 		client.Close()
 		return nil, err
 	}
-	if err := sess.Start(t.Command); err != nil {
+	info := t.Info
+	info.Name, info.Description = t.Label.registering()
+	if err := sess.Start(Command(info)); err != nil {
 		client.Close()
 		return nil, fmt.Errorf("starting registration: %w", err)
 	}
 
-	ack, _ := bufio.NewReader(stdout).ReadString('\n')
+	lines := bufio.NewReader(stdout)
+	ack, _ := lines.ReadString('\n')
 	if !strings.HasPrefix(ack, "registered ") {
 		_ = sess.Wait()
 		client.Close()
@@ -159,6 +170,41 @@ func open(ctx context.Context, t Target, logf func(string, ...any)) (*ssh.Client
 	// "registered NAME (ID)": the id is new with every registration, so the
 	// log says which one the lines that follow belong to.
 	logf("%s", strings.TrimSpace(ack))
+
+	// Edits travel both ways on the registration: the menu's come back on
+	// stdout, this side's go out on stdin. Either way the label keeps them,
+	// so the next registration carries them.
+	gone := make(chan struct{})
+	go func() {
+		defer close(gone)
+		for {
+			line, err := lines.ReadString('\n')
+			if err != nil {
+				return
+			}
+			if name, desc, ok := t.Label.apply(line); ok {
+				logf("edited at the rendezvous: name %q, description %q", name, desc)
+			}
+		}
+	}()
+	go func() {
+		for {
+			select {
+			case <-gone:
+				return
+			case <-t.Label.unsent:
+			}
+			line := t.Label.edits()
+			if line == "" {
+				continue // this registration already carried it
+			}
+			if _, err := io.WriteString(stdin, line); err != nil {
+				return // the next registration carries it
+			}
+			name, desc := t.Label.Get()
+			logf("edited here: name %q, description %q", name, desc)
+		}
+	}()
 
 	go func() {
 		t := time.NewTicker(keepAlive)
