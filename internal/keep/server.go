@@ -365,8 +365,10 @@ func (s *server) closeClients() {
 	}
 }
 
-// Exists reports whether a keeper is listening for this name, and clears a
-// socket left behind by one that is not.
+// Exists reports whether a keeper is listening for this name. It only looks:
+// a keeper that is starting has its socket a moment before it listens, and
+// refuses in between, so removing a socket that refused would orphan it --
+// running, unreachable, and never shared. Run clears one left behind.
 func Exists(name string) bool {
 	sock, err := SocketPath(name)
 	if err != nil {
@@ -374,9 +376,6 @@ func Exists(name string) bool {
 	}
 	conn, err := net.Dial("unix", sock)
 	if err != nil {
-		if errors.Is(err, syscall.ECONNREFUSED) {
-			_ = os.Remove(sock)
-		}
 		return false
 	}
 	conn.Close()
