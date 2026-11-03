@@ -48,8 +48,13 @@ type menu struct {
 	selectedID string
 	query      textinput.Model
 	notice     string
-	width      int
-	height     int
+	// describing edits the description of the session describingID while
+	// it is open; nil otherwise. Tied to the ID, not the cursor, so a
+	// refresh that moves rows never retargets the edit.
+	describing   *textinput.Model
+	describingID string
+	width        int
+	height       int
 }
 
 func newMenu(cfg menuConfig) *menu {
@@ -158,9 +163,14 @@ func (m *menu) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reload()
 		return m, tea.WindowSize() // the terminal may have been resized while joined
 	case tea.KeyMsg:
+		if m.describing != nil {
+			return m.updateDescribing(msg)
+		}
 		switch msg.Type {
 		case tea.KeyCtrlC:
 			return m, tea.Quit
+		case tea.KeyCtrlE:
+			return m.startDescribing()
 		case tea.KeyEsc:
 			if m.query.Value() != "" {
 				m.query.SetValue("")
@@ -198,6 +208,48 @@ func (m *menu) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// startDescribing opens the editor on the selected session's description as
+// it is now. Ctrl-E takes the place of the filter's end-of-line; End still
+// does that.
+func (m *menu) startDescribing() (tea.Model, tea.Cmd) {
+	s := m.selected()
+	if s == nil {
+		return m, nil
+	}
+	in := textinput.New()
+	in.Prompt = "description for " + s.Name + ": "
+	in.CharLimit = maxDescription
+	in.Placeholder = "empty shows the command"
+	in.Width = max(m.width-ansi.StringWidth(in.Prompt)-1, 1)
+	in.SetValue(s.Description)
+	in.CursorEnd()
+	m.describing, m.describingID, m.notice = &in, s.ID, ""
+	return m, in.Focus()
+}
+
+func (m *menu) updateDescribing(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch key.Type {
+	case tea.KeyCtrlC:
+		return m, tea.Quit
+	case tea.KeyEsc:
+		m.describing = nil
+		return m, nil
+	case tea.KeyEnter:
+		text := strings.TrimSpace(m.describing.Value())
+		if err := describeSession(m.cfg.dir, m.describingID, text); err != nil {
+			m.notice = "saving the description failed: " + err.Error()
+		} else {
+			m.notice = "description saved; the list shows it for everyone"
+		}
+		m.describing = nil
+		m.reload()
+		return m, nil
+	}
+	var cmd tea.Cmd
+	*m.describing, cmd = m.describing.Update(key)
+	return m, cmd
+}
+
 func notice(j joinedMsg) string {
 	switch {
 	case j.outcome == detached:
@@ -228,12 +280,17 @@ func (m *menu) View() string {
 		return strings.Join(append(top, "No active sessions; waiting for one to appear. q quits."), "\n")
 	}
 
-	help := faint.Render("enter joins · ctrl-] opens the session panel · esc quits")
+	keys := []string{"enter joins", "ctrl-e describes", "ctrl-r refreshes", "ctrl-] opens the session panel", "esc or ctrl-c quits"}
 	prompt := m.query.View() + "  " + faint.Render(fmt.Sprintf("%d/%d", len(m.visible), len(m.all)))
+	if m.describing != nil {
+		keys = []string{"enter saves the description", "esc cancels"}
+		prompt = m.describing.View()
+	}
+	help := wrapHelp(keys, m.width)
 
 	// Fill the screen: the panes run the full height, with the filter pinned
 	// to the last line.
-	body := max(m.height-len(top)-2, 3) // help and prompt take the rest
+	body := max(m.height-len(top)-len(help)-1, 3) // help and prompt take the rest
 	wide := m.width >= 90
 	listWidth, cardWidth := m.width, m.width
 	if wide {
@@ -261,7 +318,30 @@ func (m *menu) View() string {
 			faint.Render(strings.Repeat("─", max(listWidth, 1))) + "\n" +
 			lipgloss.NewStyle().Height(cardHeight).MaxHeight(cardHeight).Render(detail)
 	}
-	return strings.Join(append(top, help, pane, prompt), "\n")
+	return strings.Join(append(append(top, help...), pane, prompt), "\n")
+}
+
+// wrapHelp joins the key hints with dots, starting a new line rather than
+// letting the terminal cut one off past its edge.
+func wrapHelp(keys []string, width int) []string {
+	const sep = " · "
+	var lines []string
+	line := ""
+	for _, k := range keys {
+		if line != "" && ansi.StringWidth(line+sep+k) > width {
+			lines = append(lines, line)
+			line = ""
+		}
+		if line != "" {
+			line += sep
+		}
+		line += k
+	}
+	lines = append(lines, line)
+	for i, l := range lines {
+		lines[i] = faint.Render(ansi.Truncate(l, width, "…")) // one hint alone can still be too wide
+	}
+	return lines
 }
 
 func (m *menu) renderList(width, rows int) string {

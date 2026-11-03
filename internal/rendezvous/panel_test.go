@@ -10,6 +10,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func key(s string) tea.KeyMsg {
@@ -252,4 +253,26 @@ func TestPanelIsCentered(t *testing.T) {
 	if diff := top - bottom; diff < -1 || diff > 1 {
 		t.Fatalf("not vertically centered: %d blank lines above, %d below", top, bottom)
 	}
+}
+
+func TestPanelFitsANarrowTerminal(t *testing.T) {
+	p := newTestPanelDescribing(nil, func(string) error { return nil })
+	p.info.session.Command = "/Users/chris/.ink/bin/claude --permission-mode auto --model claude-opus-5-5[1m] --allow-dangerously-skip-permissions"
+	p.info.session.Description = strings.Repeat("d", maxDescription)
+	p.Update(tea.WindowSizeMsg{Width: 60, Height: 30})
+	assertFits := func(view string) {
+		t.Helper()
+		for _, line := range strings.Split(view, "\n") {
+			if w := ansi.StringWidth(line); w > 60 {
+				t.Fatalf("line is %d wide in a 60-wide terminal: %q\n%s", w, line, view)
+			}
+		}
+	}
+	v := p.View()
+	assertFits(v)
+	if !strings.Contains(v, "api") || !strings.Contains(v, "…") {
+		t.Fatalf("the header should keep the name and cut the command with …:\n%s", v)
+	}
+	p.Update(key("e")) // the editor holds the long description
+	assertFits(p.View())
 }

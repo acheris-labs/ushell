@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // panel is what Ctrl-] opens inside a joined session: where you are, who else
@@ -75,6 +76,7 @@ func (p *panel) Init() tea.Cmd { return nil }
 func (p *panel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if size, ok := msg.(tea.WindowSizeMsg); ok {
 		p.width, p.height = size.Width, size.Height
+		p.fitInput()
 		return p, nil
 	}
 	key, ok := msg.(tea.KeyMsg)
@@ -134,6 +136,7 @@ func (p *panel) startRename() (tea.Model, tea.Cmd) {
 	p.input.Prompt, p.input.CharLimit = "new name: ", 32
 	p.input.SetValue("")
 	p.input.Placeholder = p.info.session.Name
+	p.fitInput()
 	return p, p.input.Focus()
 }
 
@@ -148,7 +151,16 @@ func (p *panel) startDescribe() (tea.Model, tea.Cmd) {
 	p.input.SetValue(p.info.session.Description)
 	p.input.CursorEnd()
 	p.input.Placeholder = "empty shows the command"
+	p.fitInput()
 	return p, p.input.Focus()
+}
+
+// fitInput makes the editor scroll within the box rather than run past it,
+// where View would cut off the end of the text and the cursor with it.
+func (p *panel) fitInput() {
+	if p.width > 0 {
+		p.input.Width = max(p.width-panelBox.GetHorizontalFrameSize()-ansi.StringWidth(p.input.Prompt)-1, 1)
+	}
 }
 
 func (p *panel) updateEdit(key tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -226,10 +238,16 @@ func (p *panel) View() string {
 	if p.message != "" {
 		lines = append(lines, "", p.message)
 	}
-	box := panelBox.Render(strings.Join(lines, "\n"))
 	if p.width == 0 || p.height == 0 {
-		return box // size not known yet
+		return panelBox.Render(strings.Join(lines, "\n")) // size not known yet
 	}
+	// A line wider than the terminal (a long command, say) would push the
+	// box's right edge off screen, so every line is cut to fit inside it.
+	inner := max(p.width-panelBox.GetHorizontalFrameSize(), 1)
+	for i, line := range lines {
+		lines[i] = ansi.Truncate(line, inner, "…")
+	}
+	box := panelBox.Render(strings.Join(lines, "\n"))
 	return lipgloss.Place(p.width, p.height, lipgloss.Center, lipgloss.Center, box)
 }
 

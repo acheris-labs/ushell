@@ -345,6 +345,34 @@ class MenuTest(unittest.TestCase):
         self.assertIn("COMMAND/DESCRIPTION", after)
         self.assertIn("pr monitor", after)
 
+    def test_ctrl_e_in_the_list_edits_the_description(self):
+        self.share("listnoted")
+        menu = self.term()
+        self.assertTrue(menu.wait_for("listnoted", 8), menu.text)
+        menu.send(b"listnoted")  # select it
+        time.sleep(0.5)
+        menu.send(b"\x05")  # Ctrl-E
+        self.assertTrue(menu.wait_for("description for listnoted", 8), menu.text[-600:])
+        menu.send(b"from the list\r")
+        self.assertTrue(menu.wait_for("description saved", 8), menu.text[-600:])
+        self.assertIsNotNone(
+            self.entry(lambda e: e["name"] == "listnoted" and e["description"] == "from the list"),
+            "the description typed in the list never reached the registry")
+
+    def test_panel_fits_a_long_command(self):
+        # A command wider than the terminal used to push the panel's right
+        # edge off screen.
+        sharer = self.term("share", "-n", "longcmd", "--", "/bin/sh", "-c", "exec /bin/sh", "x" * 200)
+        self.assertTrue(self.registered("longcmd"), "longcmd never registered")
+        menu = self.term()
+        self.join_first(menu, "longcmd")
+        menu.send(b"\x1d")
+        self.assertTrue(menu.wait_for("back to session", 8), menu.text)
+        panel = menu.text[menu.text.rfind("longcmd"):]
+        self.assertIn("…", panel, "the command should be cut short")
+        self.assertIn("╮", menu.text, "the box's top-right corner is off screen")
+        menu.send(b"b")
+
     def test_panel_refresh_repaints_and_resumes(self):
         # Ctrl-] r nudges the window size so the program redraws; on a bare
         # shell there is nothing to redraw, so check it returns to the session.

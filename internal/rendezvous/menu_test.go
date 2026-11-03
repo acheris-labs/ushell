@@ -11,6 +11,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 var fixed = time.Unix(1_800_000_000, 0)
@@ -192,7 +193,7 @@ func TestViewNeverOutgrowsTheScreen(t *testing.T) {
 			t.Errorf("%dx%d: view is %d lines, want exactly %d", size.Width, size.Height, len(lines), size.Height)
 		}
 		for _, want := range []string{"enter joins", "NAME", "lumen", "api"} {
-			if !strings.Contains(strings.Join(lines[:min(len(lines), 4)], "\n"), want) {
+			if !strings.Contains(strings.Join(lines[:min(len(lines), 5)], "\n"), want) {
 				t.Errorf("%dx%d: %q should be in the first lines:\n%s", size.Width, size.Height, want, view)
 			}
 		}
@@ -323,5 +324,92 @@ func TestTypingFiltersOnTheDescription(t *testing.T) {
 	typeText(m, "monitor")
 	if len(m.visible) != 1 || m.visible[0].ID != api.ID {
 		t.Fatalf("visible = %+v, want only api", m.visible)
+	}
+}
+
+func TestCtrlEEditsTheSelectedSessionsDescription(t *testing.T) {
+	described := api
+	described.Description = "old"
+	m, dir := newTestMenu(t, described, build)
+	m.Update(tea.KeyMsg{Type: tea.KeyCtrlE})
+	if m.describing == nil || m.describing.Value() != "old" {
+		t.Fatalf("ctrl-e should open an editor holding the current description")
+	}
+	typeText(m, " and new")
+	if strings.Contains(m.query.Value(), "new") {
+		t.Fatal("typing while editing went into the filter")
+	}
+	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter}); isQuit(cmd) || m.describing != nil {
+		t.Fatal("enter should save and close the editor, not join or quit")
+	}
+	if got, _ := readSession(dir, api.ID); got.Description != "old and new" {
+		t.Fatalf("registry description = %q", got.Description)
+	}
+	if !strings.Contains(listPart(m.View()), "old and new") {
+		t.Fatalf("the list should show the new description at once:\n%s", m.View())
+	}
+}
+
+func TestCtrlEEscCancelsWithoutSaving(t *testing.T) {
+	m, dir := newTestMenu(t, api, build)
+	m.Update(tea.KeyMsg{Type: tea.KeyCtrlE})
+	typeText(m, "nope")
+	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc}); isQuit(cmd) || m.describing != nil {
+		t.Fatal("esc should close the editor, not quit the menu")
+	}
+	if got, _ := readSession(dir, api.ID); got.Description != "" {
+		t.Fatalf("esc saved %q", got.Description)
+	}
+}
+
+func TestCtrlEEditsTheSessionItOpenedOn(t *testing.T) {
+	m, dir := newTestMenu(t, api, build)
+	m.Update(tea.KeyMsg{Type: tea.KeyCtrlE})
+	// A refresh while editing may reorder or drop rows; the edit still lands
+	// on the session it was opened for.
+	os.Remove(filepath.Join(dir, api.ID+".json"))
+	m.Update(tickMsg{})
+	writeSession(t, dir, api)
+	m.Update(tickMsg{})
+	typeText(m, "kept")
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if got, _ := readSession(dir, api.ID); got.Description != "kept" {
+		t.Fatalf("api description = %q", got.Description)
+	}
+	if got, _ := readSession(dir, build.ID); got.Description != "" {
+		t.Fatalf("build was edited instead: %q", got.Description)
+	}
+}
+
+func TestCtrlEOnAnEndedSessionSaysSo(t *testing.T) {
+	m, dir := newTestMenu(t, api)
+	m.Update(tea.KeyMsg{Type: tea.KeyCtrlE})
+	os.Remove(filepath.Join(dir, api.ID+".json"))
+	typeText(m, "x")
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.describing != nil || !strings.Contains(m.View(), "failed") {
+		t.Fatalf("saving to an ended session should close the editor with an error:\n%s", m.View())
+	}
+}
+
+func TestHelpShowsEveryKeyAndWrapsToFit(t *testing.T) {
+	for _, width := range []int{120, 80, 40} {
+		m, _ := newTestMenu(t, api, build)
+		m.Update(tea.WindowSizeMsg{Width: width, Height: 30})
+		view := m.View()
+		lines := strings.Split(view, "\n")
+		if len(lines) != 30 {
+			t.Errorf("%d wide: view is %d lines, want 30", width, len(lines))
+		}
+		for _, line := range lines {
+			if w := ansi.StringWidth(line); w > width {
+				t.Errorf("%d wide: a %d-wide line: %q", width, w, line)
+			}
+		}
+		for _, want := range []string{"enter joins", "ctrl-e describes", "ctrl-r refreshes", "ctrl-] opens the session panel", "esc or ctrl-c quits"} {
+			if !strings.Contains(view, want) {
+				t.Errorf("%d wide: help missing %q:\n%s", width, want, view)
+			}
+		}
 	}
 }
