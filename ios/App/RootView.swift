@@ -22,6 +22,7 @@ struct RootView: View {
             .overlay(alignment: .top) {
                 if let tab = workspace.front { PhaseBanner(phase: tab.phase) }
             }
+            .overlay { TabFlash() }
             // The terminal gets the whole screen; the pull tab brings the
             // sessions back.
             .toolbar(.hidden, for: .navigationBar)
@@ -81,6 +82,46 @@ private struct SidebarPullTab: View {
             .accessibilityAddTraits(.isButton)
             .accessibilityAction { workspace.showTree() }
             .accessibilityIdentifier("sessions.pull")
+    }
+}
+
+/// Names the tab ⌘N picked for a moment: with no tab bar, nothing else says
+/// which session that number was.
+private struct TabFlash: View {
+    @Environment(Workspace.self) private var workspace
+    /// UI tests stretch it: the simulator takes longer than a second just to
+    /// report the key press.
+    private let flashSeconds = Double(ProcessInfo.processInfo.environment["USH_TEST_FLASH_SECONDS"] ?? "") ?? 1
+
+    var body: some View {
+        Group {
+            if let flash = workspace.flashed, let tab = workspace.tabs.first(where: { $0.id == flash.tabID }) {
+                let session = workspace.session(for: tab)
+                VStack(spacing: 4) {
+                    Text("⌘\(workspace.shortcut(for: tab).map(String.init) ?? "")  \(session?.name ?? tab.title)")
+                        .font(.title2).bold()
+                    if let summary = session?.summary, !summary.isEmpty {
+                        Text(summary).font(.body).multilineTextAlignment(.center)
+                    }
+                    Text(tab.machine).font(.caption).foregroundStyle(machineColor(tab.machine))
+                }
+                .padding(.horizontal, 24).padding(.vertical, 16)
+                .background(.regularMaterial, in: .rect(cornerRadius: 16))
+                .padding(32)
+                .transition(.opacity)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("flash")
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: workspace.flashed)
+        .allowsHitTesting(false)
+        // A new press changes the id, which cancels this wait and starts
+        // another, so the flash always lasts its full time from the last press.
+        .task(id: workspace.flashed) {
+            guard let flash = workspace.flashed else { return }
+            guard (try? await Task.sleep(for: .seconds(flashSeconds))) != nil else { return }
+            if workspace.flashed == flash { workspace.flashed = nil }
+        }
     }
 }
 

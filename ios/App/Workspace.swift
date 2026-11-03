@@ -23,6 +23,13 @@ final class Workspace {
     var active = true
     var tabs: [TerminalTab] = []
     var frontID: TerminalTab.ID?
+    /// The tab ⌘N just picked, named briefly over the terminal. `serial`
+    /// changes on every press, so pressing again restarts the timer.
+    var flashed: Flash?
+    struct Flash: Equatable {
+        let tabID: TerminalTab.ID
+        let serial: Int
+    }
     var columnVisibility: NavigationSplitViewVisibility = .all
     var preferredColumn: NavigationSplitViewColumn = .sidebar
     var hardwareKeyboard = GCKeyboard.coalesced != nil {
@@ -131,7 +138,23 @@ final class Workspace {
     }
 
     func select(index: Int) {
-        if tabs.indices.contains(index) { bringToFront(tabs[index]) }
+        guard tabs.indices.contains(index) else { return }
+        bringToFront(tabs[index])
+        flashed = Flash(tabID: tabs[index].id, serial: (flashed?.serial ?? 0) + 1)
+    }
+
+    /// The ⌘ number that picks `tab`: tabs count up in the order they were
+    /// opened, and only the first nine have one.
+    func shortcut(for tab: TerminalTab) -> Int? {
+        guard let i = tabs.firstIndex(where: { $0 === tab }), i < 9 else { return nil }
+        return i + 1
+    }
+
+    /// The session as last listed, so a description edited since the tab
+    /// opened shows as it is now.
+    func session(for tab: TerminalTab) -> SessionInfo? {
+        rendezvous.first { $0.profile.name == tab.profileName }?
+            .sessions.first { $0.id == tab.sessionID }
     }
 
     func cycle(by step: Int) {

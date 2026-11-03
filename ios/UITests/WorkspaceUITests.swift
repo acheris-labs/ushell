@@ -59,6 +59,42 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertEqual(echo.value as? String, "front")
     }
 
+    func testTheTreeShowsEachSessionsNumberAndCommandDigitsNameIt() throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let port = env["USH_TEST_PORT"], let seed = env["USH_TEST_SEED"] else {
+            throw XCTSkip("needs a local ushd: make test-ios-ui")
+        }
+        let app = XCUIApplication()
+        app.launchEnvironment["USH_TEST_PAYLOAD"] =
+            #"{"v":1,"name":"test","host":"127.0.0.1","port":\#(port),"user":"ush","seed":"\#(seed)"}"#
+        app.launchEnvironment["USH_TEST_FLASH_SECONDS"] = "5" // the simulator is slow to report a key
+        app.launch()
+
+        let echo = app.buttons["session.swift-echo"], other = app.buttons["session.swift-other"]
+        XCTAssertTrue(echo.waitForExistence(timeout: 15), "the tree never listed swift-echo")
+        XCTAssertFalse(app.staticTexts["shortcut.swift-echo"].exists, "a session not open has no number")
+        echo.tap()
+        app.typeKey(XCUIKeyboardKey.shift, modifierFlags: []) // see the first test
+        XCTAssertTrue(waitUntil { !other.isHittable })
+        app.buttons["sessions.pull"].tap()
+        XCTAssertTrue(waitUntil { other.isHittable })
+        other.tap()
+        XCTAssertTrue(waitUntil { !echo.isHittable })
+
+        // The numbers follow the order the sessions were opened in.
+        app.typeKey("o", modifierFlags: .command)
+        XCTAssertTrue(waitUntil { echo.isHittable })
+        XCTAssertEqual(app.staticTexts["shortcut.swift-echo"].label, "Command 1")
+        XCTAssertEqual(app.staticTexts["shortcut.swift-other"].label, "Command 2")
+
+        // ⌘1 names the session it picked, then the name goes away.
+        app.typeKey("1", modifierFlags: .command)
+        let flash = app.descendants(matching: .any)["flash"]
+        XCTAssertTrue(flash.waitForExistence(timeout: 2), "⌘1 flashed nothing")
+        XCTAssertTrue(flash.label.contains("swift-echo"), "the flash named \(flash.label)")
+        XCTAssertTrue(waitUntil(timeout: 8) { !flash.exists }, "the flash stayed up")
+    }
+
     func testASessionThatEndsCloses() throws {
         let env = ProcessInfo.processInfo.environment
         guard let port = env["USH_TEST_PORT"], let seed = env["USH_TEST_SEED"] else {

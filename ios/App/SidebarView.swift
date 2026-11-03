@@ -175,6 +175,11 @@ struct SessionRow: View {
                         .accessibilityLabel("\(n) watching")
                         .accessibilityIdentifier("viewers.\(session.name)")
                 }
+                if let tab, let n = workspace.shortcut(for: tab) {
+                    Text("⌘\(n)").font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                        .accessibilityLabel("Command \(n)")
+                        .accessibilityIdentifier("shortcut.\(session.name)")
+                }
                 Text(session.age(now: .now)).font(.caption).monospacedDigit().foregroundStyle(.secondary)
             }
         }
